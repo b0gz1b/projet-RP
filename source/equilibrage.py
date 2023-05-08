@@ -3,6 +3,7 @@ from collections import defaultdict
 import random, heapq, time
 import numpy as np
 from copy import copy, deepcopy
+from itertools import zip_longest
 
 def measure(n: int, m: int, t_i: List[int], algo, vo = None, cr = None):
     """
@@ -24,7 +25,7 @@ def measure(n: int, m: int, t_i: List[int], algo, vo = None, cr = None):
 
     return makespan(t_i, af), end - start
 
-def rand_instance(n: int, lower: int = 1, higher: int = 1000) -> List[int]:
+def rand_instance(n: int, lower: int = 1, higher: int = 100) -> List[int]:
     """
     Renvoie une instance aléatoire du problème d'équilibrage des charges pour n tâches
     :param n: Le nombre de tâches
@@ -132,14 +133,15 @@ def permutation(m: int, af: dict, mi, mj, bi, bj) -> dict:
     :return: Une affectation des tâches
     """
     af_res = deepcopy(af)
-    for ti in bi:
-        af_res[mi].remove(ti)
-    for tj in bj:
-        af_res[mj].remove(tj)
-    for tj in bj:
-        af_res[mi].append(tj)
-    for ti in bi:
-        af_res[mj].append(ti)
+    for ti, tj in zip_longest(bi, bj, fillvalue=None):
+        if ti:
+            af_res[mi].remove(ti)
+        if tj:
+            af_res[mj].remove(tj)
+        if tj:
+            af_res[mi].append(tj)
+        if ti:
+            af_res[mj].append(ti)
     return af_res
 
 def lexico(n: int, m: int, t_i: List[int], af1, af2, mi = None, mj = None):
@@ -152,23 +154,18 @@ def lexico(n: int, m: int, t_i: List[int], af1, af2, mi = None, mj = None):
     :param af2: La nouvelle affectation
     :return: Le makespan et le temps
     """
-    def _cout(n: int, m: int, af):
-        ms = makespan(t_i, af)
-        crit = 0
-        for taches in af.values():
-            c = 0
-            for i in taches:
-                c += t_i[i]
-            
-            if not(c < ms):
-                crit += 1
-        
-        return ms, crit
+    ms1 = makespan(af1)
+    ms2 = makespan(af2)
 
-    ms1, crit1 = _cout(n, m, af1)
-    ms2, crit2 = _cout(n, m, af2)
+    if ms2 < ms1:
+        return True
+    elif ms2 > ms1:
+        return False
     
-    return ms1 > ms2 or (ms1 == ms2 and crit1 > crit2)
+    crit1 = len([taches for taches in af1.values() if sum([t_i[i] for i in taches]) >= ms1])
+    crit2 = len([taches for taches in af2.values() if sum([t_i[i] for i in taches]) >= ms2])
+    
+    return crit1 > crit2
 
 def pair(n: int, m: int, t_i: List[int], af1, af2, mi, mj):
     """
@@ -185,11 +182,7 @@ def pair(n: int, m: int, t_i: List[int], af1, af2, mi, mj):
 
 def recherche_locale(n: int, m: int, t_i: List[int], vo, cr):
     def _sub_lists(l):
-        lists = [[]]
-        for i in range(len(l) + 1):
-            for j in range(i):
-                lists.append(l[j: i])
-        return lists
+        return [l[j:i] for i in range(len(l)+1) for j in range(i)]
     
     if cr == "cmax":
         c_func = lambda n, m, t_i, af1, af2, mi = None, mj = None : makespan(t_i, af1) > makespan(t_i, af2)
@@ -203,37 +196,44 @@ def recherche_locale(n: int, m: int, t_i: List[int], vo, cr):
         start_af[int(random.random()*m)].append(i)
     
     def _recherche_locale(af):
-        perm_mi = list(range(m))
-        # random.shuffle(perm_mi)
-        perm_mj = list(range(m))
-        # random.shuffle(perm_mj)
+        perm_mi = random.sample(range(m), m)
+        perm_mj = random.sample(range(m), m)
+        next_af = None
+        nc_next = float("inf")
         for mi in perm_mi:
-            perm_t = copy(af[mi])
-            # random.shuffle(perm_t)
+            perm_t = random.sample(af[mi], len(af[mi]))
             for mj in perm_mj:
-                perm_tj = copy(af[mj])
-                # random.shuffle(perm_tj)
+                perm_tj = random.sample(af[mj], len(af[mj]))
                 if mi != mj:
                     if vo == "insertion" or vo == "echange":
                         for t in perm_t:
                             if vo == "insertion":
                                 new_af = insertion(m, af, mi, mj, t)
-                                if c_func(n, m, t_i, af, new_af, mi, mj):
-                                    return _recherche_locale(new_af) # Ameliorant
+                                mnaf = makespan(t_i, new_af)
+                                if c_func(n, m, t_i, af, new_af, mi, mj) and mnaf < nc_next:
+                                    next_af = new_af # Ameliorant
+                                    nc_next = mnaf
                             else:
                                 for tj in perm_tj:
                                     new_af = echange(m, af, mi, mj, t, tj)
-                                    if c_func(n, m, t_i, af, new_af, mi, mj):
-                                        return _recherche_locale(new_af) # Ameliorant
+                                    mnaf = makespan(t_i, new_af)
+                                    if c_func(n, m, t_i, af, new_af, mi, mj) and mnaf < nc_next:
+                                        next_af = new_af # Ameliorant
+                                        nc_next = mnaf
                     elif vo == "permutation":
                         subsets_mi = _sub_lists(af[mi])
                         subsets_mj = _sub_lists(af[mj])
-                        # random.shuffle(subsets_mi)
-                        # random.shuffle(subsets_mj)
-                        for bi in subsets_mi:
-                            for bj in subsets_mj:
+                        perm_subsets_mi = random.sample(subsets_mi, len(subsets_mi))
+                        perm_subsets_mj = random.sample(subsets_mj, len(subsets_mj))
+                        for bi in perm_subsets_mi:
+                            for bj in perm_subsets_mj:
                                 new_af = permutation(m, af, mi, mj, bi, bj)
-                                if c_func(n, m, t_i, af, new_af, mi, mj):
-                                    return _recherche_locale(new_af) # Ameliorant
-        return af # Stable
+                                mnaf = makespan(t_i, new_af)
+                                if c_func(n, m, t_i, af, new_af, mi, mj) and mnaf < nc_next:
+                                    next_af = new_af # Ameliorant
+                                    nc_next = mnaf
+        if next_af != None:
+            return _recherche_locale(next_af) # Ameliorant            
+        else:
+            return af # Stable
     return _recherche_locale(start_af)
